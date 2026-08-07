@@ -1,8 +1,18 @@
 import { execFile } from "node:child_process"
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises"
+import { readFile, realpath } from "node:fs/promises"
 import { homedir } from "node:os"
-import { basename, dirname, join } from "node:path"
+import { basename, join } from "node:path"
 import { promisify } from "node:util"
+
+import {
+  getCurrentBootId,
+  getSnapshotDirectory,
+  loadRecoverySnapshot,
+  migrateLegacySnapshot,
+  withSnapshotLock,
+  writeCustomSnapshot,
+  writeSnapshot,
+} from "./snapshot-history.js"
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_AGENT_DIRECTORY = join(homedir(), ".omp", "agent")
@@ -10,54 +20,82 @@ const DEFAULT_AGENT_DIRECTORY = join(homedir(), ".omp", "agent")
 export default function ompSessionResumeHelper(pi) {
   pi.setLabel("OMP Session Resume Helper")
   registerSessionCommands(pi)
+  registerLifecycleSnapshots(pi)
+}
+
+export function registerLifecycleSnapshots(pi, dependencies = {}) {
+  const capture = dependencies.capture ?? captureActiveSessions
+
+  pi.on("session_start", async (_event, context) => {
+    await persistLifecycleSnapshot(pi, capture, context)
+  })
+  pi.on("session_shutdown", async (_event, context) => {
+    await persistLifecycleSnapshot(pi, capture, context, getContextSessionId(context))
+  })
 }
 
 export function registerSessionCommands(pi, dependencies = {}) {
-  const findSessions = dependencies.findSessions ?? findActiveSessions
-  const saveSnapshot = dependencies.saveSnapshot ?? writeSnapshot
-  const loadSnapshot = dependencies.loadSnapshot ?? readSnapshot
+  const capture = dependencies.capture ?? captureActiveSessions
+  const loadRecovery = dependencies.loadRecovery ?? loadRecoverySnapshot
+  const loadSnapshot = dependencies.loadSnapshot ?? readCustomSnapshot
   const homeDirectory = dependencies.homeDirectory ?? homedir()
 
   pi.registerCommand("dump-active-sessions", {
     description: "Save manual OMP resume commands for active sessions",
     handler: async (args, context) => {
-      const snapshotPath = resolveSnapshotPath(args, homeDirectory)
-      const sessions = await findSessions()
+      const outputPath = resolveCustomSnapshotPath(args, homeDirectory)
+      const snapshot = await capture({ homeDirectory, outputPath })
+      const sessionDescription = snapshot.sessionCount === 1 ? "1 active OMP session" : `${snapshot.sessionCount} active OMP sessions`
 
-      if (sessions.length === 0) {
-        context.ui.notify("No active OMP sessions found; the existing snapshot was not changed.", "warning")
-        return
-      }
-
-      await saveSnapshot(snapshotPath, formatResumeCommands(sessions))
-      context.ui.notify(`Saved ${sessions.length} active OMP session${sessions.length === 1 ? "" : "s"} to ${snapshotPath}.`, "info")
+      context.ui.notify(`Saved ${sessionDescription} to ${snapshot.path}.`, "info")
     },
   })
 
   pi.registerCommand("restore-active-sessions", {
     description: "Show saved OMP resume commands without starting sessions",
     handler: async (args, context) => {
-      const snapshotPath = resolveSnapshotPath(args, homeDirectory)
+      const outputPath = resolveCustomSnapshotPath(args, homeDirectory)
+      const snapshot = outputPath
+        ? { commands: await loadSnapshot(outputPath), path: outputPath }
+        : await loadRecovery({ homeDirectory })
 
-      let snapshot
-      try {
-        snapshot = await loadSnapshot(snapshotPath)
-      } catch (error) {
-        if (error?.code === "ENOENT") {
-          context.ui.notify(`No active-session snapshot exists at ${snapshotPath}.`, "warning")
-          return
-        }
-
-        throw error
-      }
-
-      if (snapshot.trim() === "") {
-        context.ui.notify(`The active-session snapshot at ${snapshotPath} is empty.`, "warning")
+      if (!snapshot) {
+        context.ui.notify("No active-session snapshots exist yet.", "warning")
         return
       }
 
-      await context.ui.editor("Resume Active OMP Sessions — Copy Commands Manually", snapshot)
+      if (snapshot.commands.trim() === "") {
+        context.ui.notify(`The newest recovery snapshot at ${snapshot.path} has no active OMP sessions.`, "warning")
+        return
+      }
+
+      await context.ui.editor("Resume Active OMP Sessions — Copy Commands Manually", snapshot.commands)
     },
+  })
+}
+
+export async function captureActiveSessions(options = {}) {
+  const homeDirectory = options.homeDirectory ?? homedir()
+  const historyDirectory = options.historyDirectory ?? getSnapshotDirectory(homeDirectory)
+  const bootId = options.bootId ?? await getCurrentBootId(options.bootIdPath)
+  const findSessions = options.findSessions ?? findActiveSessions
+
+  return withSnapshotLock(historyDirectory, bootId, async () => {
+    await migrateLegacySnapshot({ historyDirectory, homeDirectory })
+
+    const sessions = await findSessions({ excludeSessionId: options.excludeSessionId })
+    const commands = formatResumeCommands(sessions)
+
+    const snapshot = await writeSnapshot(commands, { bootId, historyDirectory })
+
+    if (options.outputPath) {
+      await writeCustomSnapshot(options.outputPath, commands)
+    }
+
+    return {
+      path: options.outputPath ?? snapshot.path,
+      sessionCount: sessions.length,
+    }
   })
 }
 
@@ -76,9 +114,9 @@ export async function findActiveSessions(options = {}) {
         readFile(terminalRecord, "utf8"),
         realpath(join(processDirectory, process.pid, "cwd")),
       ])
-      const sessionId = getSessionId(record)
+      const sessionId = getSessionIdFromPath(record.split("\n")[1])
 
-      if (!sessionId) {
+      if (!sessionId || sessionId === options.excludeSessionId) {
         return undefined
       }
 
@@ -101,11 +139,11 @@ export function formatResumeCommands(sessions) {
   )).join("\n\n")}\n`
 }
 
-export function resolveSnapshotPath(args, homeDirectory = homedir()) {
+export function resolveCustomSnapshotPath(args, homeDirectory = homedir()) {
   const requestedPath = args.trim()
 
   if (requestedPath === "") {
-    return join(homeDirectory, ".local", "state", "omp-session-resume-helper", "active-sessions.txt")
+    return undefined
   }
 
   if (requestedPath === "~") {
@@ -123,10 +161,26 @@ export function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
-function getSessionId(terminalRecord) {
-  const sessionFile = terminalRecord.split("\n")[1]
-  const match = sessionFile && basename(sessionFile).match(/_([^_]+)\.jsonl$/)
+async function persistLifecycleSnapshot(pi, capture, context, excludeSessionId) {
+  try {
+    await capture({ excludeSessionId })
+  } catch (error) {
+    pi.logger?.warn(`Could not save active OMP session history: ${error.message}`)
+  }
+}
 
+function getContextSessionId(context) {
+  const sessionId = context.sessionManager?.getSessionId?.()
+
+  if (typeof sessionId === "string" && sessionId !== "") {
+    return sessionId
+  }
+
+  return getSessionIdFromPath(context.sessionManager?.sessionFile)
+}
+
+function getSessionIdFromPath(sessionFile) {
+  const match = sessionFile && basename(sessionFile).match(/_([^_]+)\.jsonl$/)
   return match?.[1]
 }
 
@@ -157,11 +211,6 @@ async function listProcessesFromSystem() {
   })
 }
 
-async function writeSnapshot(snapshotPath, snapshot) {
-  await mkdir(dirname(snapshotPath), { recursive: true })
-  await writeFile(snapshotPath, snapshot, { encoding: "utf8", mode: 0o600 })
-}
-
-async function readSnapshot(snapshotPath) {
+async function readCustomSnapshot(snapshotPath) {
   return readFile(snapshotPath, "utf8")
 }
