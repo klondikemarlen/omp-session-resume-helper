@@ -69,7 +69,7 @@ export function registerSessionCommands(pi, dependencies = {}) {
         return
       }
 
-      await context.ui.editor("Resume Active OMP Sessions — Copy Commands Manually", snapshot.commands)
+      context.ui.notify(snapshot.commands, "info")
     },
   })
 }
