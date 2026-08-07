@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: omp-active-sessions [--output FILE]
+
+Print one copyable `cd … && omp --resume …` command for every live interactive
+OMP session. The output is a command list; run entries in separate terminals.
+EOF
+}
+
+output_file=''
+
+while (($#)); do
+  case "$1" in
+    --output)
+      if (($# < 2)); then
+        printf '%s\n' 'error: --output requires a file path' >&2
+        exit 2
+      fi
+      output_file=$2
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'error: unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -n "$output_file" ]]; then
+  exec >"$output_file"
+fi
+
+agent_directory=${PI_CODING_AGENT_DIR:-"$HOME/.omp/agent"}
+terminal_sessions_directory="$agent_directory/terminal-sessions"
+process_directory=${OMP_PROCESS_DIRECTORY:-/proc}
+process_status_command=${OMP_PROCESS_STATUS_COMMAND:-ps}
+
+for process in "$process_directory"/[0-9]*; do
+  [[ -r "$process/cmdline" ]] || continue
+
+  process_id=${process##*/}
+  command_line=$(tr '\0' ' ' <"$process/cmdline")
+
+  case "$command_line" in
+    omp|omp\ *|*/omp|*/omp\ *) ;;
+    *) continue ;;
+  esac
+
+  case "$command_line" in
+    *' __omp_worker_'*) continue ;;
+  esac
+
+  terminal_name=$("$process_status_command" -p "$process_id" -o tty= 2>/dev/null | tr -d '[:space:]') || continue
+  case "$terminal_name" in
+    pts/*) ;;
+    *) continue ;;
+  esac
+
+  terminal_record="$terminal_sessions_directory/${terminal_name//\//-}"
+  [[ -r "$terminal_record" ]] || continue
+
+  session_file=$(sed -n '2p' "$terminal_record")
+  case "$session_file" in
+    *.jsonl) ;;
+    *) continue ;;
+  esac
+
+  session_id=${session_file##*_}
+  session_id=${session_id%.jsonl}
+  [[ -n "$session_id" && "$session_id" != "$session_file" ]] || continue
+
+  working_directory=$(readlink -f "$process/cwd") || continue
+  printf 'cd %q && omp --resume %q\n\n' "$working_directory" "$session_id"
+done
