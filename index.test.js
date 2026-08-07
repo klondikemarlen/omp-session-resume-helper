@@ -102,13 +102,12 @@ test("resume commands quote paths and session IDs for Bash", () => {
 test("dump and show commands keep automatic snapshots manual to use", async () => {
   const commands = new Map()
   const notifications = []
-  const editors = []
   const captures = []
   const recoveryPath = "/home/marlen/.local/state/omp-session-resume-helper/snapshots/recovery.txt"
   const recoveryCommands = "cd '/worktree/project' && omp --resume '019fb989-c2ee-7000-96ea-2a2cce5229b6'\n"
 
   const pi = createPi(commands)
-  const context = createContext(notifications, editors)
+  const context = createContext(notifications)
 
   registerSessionCommands(pi, {
     capture: async (options) => {
@@ -123,14 +122,16 @@ test("dump and show commands keep automatic snapshots manual to use", async () =
   await commands.get("show-saved-sessions").handler("", context)
 
   assert.deepEqual(captures, [{ homeDirectory: "/home/marlen", outputPath: undefined }])
-  assert.deepEqual(notifications, [{
-    message: `Saved 1 active OMP session to ${recoveryPath}.`,
-    type: "info",
-  }])
-  assert.deepEqual(editors, [{
-    title: "Resume Active OMP Sessions — Copy Commands Manually",
-    contents: recoveryCommands,
-  }])
+  assert.deepEqual(notifications, [
+    {
+      message: `Saved 1 active OMP session to ${recoveryPath}.`,
+      type: "info",
+    },
+    {
+      message: recoveryCommands,
+      type: "info",
+    },
+  ])
 })
 
 test("custom dump and show paths stay supported", async () => {
@@ -139,7 +140,7 @@ test("custom dump and show paths stay supported", async () => {
   const loadedPaths = []
   const customPath = "/home/marlen/resume commands.txt"
   const pi = createPi(commands)
-  const context = createContext([], [])
+  const context = createContext([])
 
   registerSessionCommands(pi, {
     capture: async (options) => {
@@ -245,14 +246,11 @@ function createPi(commands, handlers = new Map()) {
   }
 }
 
-function createContext(notifications, editors) {
+function createContext(notifications) {
   return {
     ui: {
       notify(message, type) {
         notifications.push({ message, type })
-      },
-      async editor(title, contents) {
-        editors.push({ title, contents })
       },
     },
   }
