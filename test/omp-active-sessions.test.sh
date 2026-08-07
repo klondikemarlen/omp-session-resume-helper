@@ -33,6 +33,7 @@ case "$2" in
   102) printf 'pts/9\n' ;;
   103) printf 'pts/10\n' ;;
   104) printf '?\n' ;;
+  105) printf 'pts/11\n' ;;
   *) exit 1 ;;
 esac
 EOF
@@ -43,6 +44,7 @@ create_process 101 omp __omp_worker_tiny_inference
 create_process 102 bash
 create_process 103 omp --resume old-session
 create_process 104 omp
+create_process 105 /usr/local/bin/omp
 
 printf '%s\n%s\n' \
   "$working_directory" \
@@ -52,6 +54,10 @@ printf '%s\n%s\n' \
   "$working_directory" \
   '/sessions/2026-08-07_019fb981-7adc-7000-a991-935c9a97acea.jsonl' \
   >"$agent_directory/terminal-sessions/pts-10"
+printf '%s\n%s\n' \
+  "$working_directory" \
+  '/sessions/2026-08-07_019fdd42-e19a-7000-9bf6-1b1e5fd86a11.jsonl' \
+  >"$agent_directory/terminal-sessions/pts-11"
 
 expected_output="$temporary_directory/expected"
 printf 'cd %q && omp --resume %q\n\n' \
@@ -61,6 +67,10 @@ printf 'cd %q && omp --resume %q\n\n' \
 printf 'cd %q && omp --resume %q\n\n' \
   "$working_directory" \
   '019fb981-7adc-7000-a991-935c9a97acea' \
+  >>"$expected_output"
+printf 'cd %q && omp --resume %q\n\n' \
+  "$working_directory" \
+  '019fdd42-e19a-7000-9bf6-1b1e5fd86a11' \
   >>"$expected_output"
 
 actual_output="$temporary_directory/actual"

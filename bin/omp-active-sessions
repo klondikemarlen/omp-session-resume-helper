@@ -50,7 +50,7 @@ for process in "$process_directory"/[0-9]*; do
   command_line=$(tr '\0' ' ' <"$process/cmdline")
 
   case "$command_line" in
-    omp|omp\ *|*/omp\ *) ;;
+    omp|omp\ *|*/omp|*/omp\ *) ;;
     *) continue ;;
   esac
 
