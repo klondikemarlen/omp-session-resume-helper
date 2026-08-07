@@ -52,7 +52,7 @@ export function registerSessionCommands(pi, dependencies = {}) {
   })
 
   pi.registerCommand("show-saved-sessions", {
-    description: "Show a saved OMP session snapshot without starting sessions",
+    description: "Show a saved OMP session snapshot path without starting sessions",
     handler: async (args, context) => {
       const outputPath = resolveCustomSnapshotPath(args, homeDirectory)
       const snapshot = outputPath
@@ -69,7 +69,7 @@ export function registerSessionCommands(pi, dependencies = {}) {
         return
       }
 
-      context.ui.notify(snapshot.commands, "info")
+      context.ui.notify(`Saved session snapshot: ${snapshot.path}\nRun: cat ${shellQuote(snapshot.path)}`, "info")
     },
   })
 }
