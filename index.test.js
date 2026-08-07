@@ -7,8 +7,9 @@ import { test } from "node:test"
 import ompSessionResumeHelper, {
   findActiveSessions,
   formatResumeCommands,
+  registerLifecycleSnapshots,
   registerSessionCommands,
-  resolveSnapshotPath,
+  resolveCustomSnapshotPath,
   shellQuote,
 } from "./index.js"
 
@@ -56,6 +57,33 @@ test("findActiveSessions exports plain and absolute OMP processes only", async (
   ])
 })
 
+test("normal shutdown excludes the stopping OMP session", async (testContext) => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "omp-session-resume-helper-"))
+  testContext.after(() => rm(temporaryDirectory, { force: true, recursive: true }))
+  const agentDirectory = join(temporaryDirectory, "agent")
+  const processDirectory = join(temporaryDirectory, "proc")
+  const workingDirectory = join(temporaryDirectory, "worktree")
+  const stoppingSessionId = "019fb989-c2ee-7000-96ea-2a2cce5229b6"
+
+  await mkdir(join(agentDirectory, "terminal-sessions"), { recursive: true })
+  await mkdir(join(processDirectory, "100"), { recursive: true })
+  await mkdir(workingDirectory)
+  await symlink(workingDirectory, join(processDirectory, "100", "cwd"))
+  await writeFile(
+    join(agentDirectory, "terminal-sessions", "pts-7"),
+    `${workingDirectory}\n/sessions/2026-08-07_${stoppingSessionId}.jsonl\n`,
+  )
+
+  const sessions = await findActiveSessions({
+    agentDirectory,
+    excludeSessionId: stoppingSessionId,
+    processDirectory,
+    listProcesses: async () => [{ pid: "100", terminal: "pts/7", command: "omp" }],
+  })
+
+  assert.deepEqual(sessions, [])
+})
+
 test("resume commands quote paths and session IDs for Bash", () => {
   assert.equal(shellQuote("/worktree/Marlen's project"), "'/worktree/Marlen'\\''s project'")
   assert.equal(
@@ -69,21 +97,128 @@ test("resume commands quote paths and session IDs for Bash", () => {
   )
 })
 
-test("dump and restore commands save and display commands without launching sessions", async () => {
+test("dump and restore commands keep automatic snapshots manual to use", async () => {
   const commands = new Map()
   const notifications = []
   const editors = []
-  const snapshotPath = "/home/marlen/.local/state/omp-session-resume-helper/active-sessions.txt"
-  let savedPath
-  let savedSnapshot
+  const captures = []
+  const recoveryPath = "/home/marlen/.local/state/omp-session-resume-helper/snapshots/recovery.txt"
+  const recoveryCommands = "cd '/worktree/project' && omp --resume '019fb989-c2ee-7000-96ea-2a2cce5229b6'\n"
 
-  const pi = {
-    setLabel() {},
+  const pi = createPi(commands)
+  const context = createContext(notifications, editors)
+
+  registerSessionCommands(pi, {
+    capture: async (options) => {
+      captures.push(options)
+      return { path: recoveryPath, sessionCount: 1 }
+    },
+    homeDirectory: "/home/marlen",
+    loadRecovery: async () => ({ commands: recoveryCommands, path: recoveryPath }),
+  })
+
+  await commands.get("dump-active-sessions").handler("", context)
+  await commands.get("restore-active-sessions").handler("", context)
+
+  assert.deepEqual(captures, [{ homeDirectory: "/home/marlen", outputPath: undefined }])
+  assert.deepEqual(notifications, [{
+    message: `Saved 1 active OMP session to ${recoveryPath}.`,
+    type: "info",
+  }])
+  assert.deepEqual(editors, [{
+    title: "Resume Active OMP Sessions — Copy Commands Manually",
+    contents: recoveryCommands,
+  }])
+})
+
+test("custom dump and restore paths stay supported", async () => {
+  const commands = new Map()
+  const captures = []
+  const loadedPaths = []
+  const customPath = "/home/marlen/resume commands.txt"
+  const pi = createPi(commands)
+  const context = createContext([], [])
+
+  registerSessionCommands(pi, {
+    capture: async (options) => {
+      captures.push(options)
+      return { path: customPath, sessionCount: 0 }
+    },
+    homeDirectory: "/home/marlen",
+    loadSnapshot: async (path) => {
+      loadedPaths.push(path)
+      return "resume command\n"
+    },
+  })
+
+  await commands.get("dump-active-sessions").handler("~/resume commands.txt", context)
+  await commands.get("restore-active-sessions").handler("~/resume commands.txt", context)
+
+  assert.deepEqual(captures, [{ homeDirectory: "/home/marlen", outputPath: customPath }])
+  assert.deepEqual(loadedPaths, [customPath])
+})
+
+test("lifecycle snapshots run at startup and process shutdown", async () => {
+  const commands = new Map()
+  const handlers = new Map()
+  const captures = []
+  const pi = createPi(commands, handlers)
+
+  registerLifecycleSnapshots(pi, {
+    capture: async (options) => {
+      captures.push(options)
+    },
+  })
+
+  const context = {
+    sessionManager: {
+      getSessionId() {
+        return "019fb989-c2ee-7000-96ea-2a2cce5229b6"
+      },
+    },
+  }
+  await handlers.get("session_start")({}, context)
+  await handlers.get("session_shutdown")({}, context)
+
+  assert.equal(handlers.has("session_stop"), false)
+  assert.deepEqual(captures, [
+    { excludeSessionId: undefined },
+    { excludeSessionId: "019fb989-c2ee-7000-96ea-2a2cce5229b6" },
+  ])
+})
+
+test("the plugin registers commands and lifecycle snapshots", () => {
+  const commands = new Map()
+  const handlers = new Map()
+
+  ompSessionResumeHelper(createPi(commands, handlers))
+
+  assert.deepEqual([...commands.keys()].sort(), ["dump-active-sessions", "restore-active-sessions"])
+  assert.deepEqual([...handlers.keys()].sort(), ["session_shutdown", "session_start"])
+})
+
+test("custom snapshot paths expand the home directory", () => {
+  assert.equal(resolveCustomSnapshotPath("", "/home/marlen"), undefined)
+  assert.equal(resolveCustomSnapshotPath("~/resume.txt", "/home/marlen"), "/home/marlen/resume.txt")
+})
+
+function createPi(commands, handlers = new Map()) {
+  return {
+    logger: {
+      warn() {},
+    },
+    on(name, handler) {
+      handlers.set(name, handler)
+    },
     registerCommand(name, options) {
       commands.set(name, options)
     },
+    setLabel() {},
   }
-  const context = {
+}
+
+function createContext(notifications, editors) {
+  return {
     ui: {
       notify(message, type) {
         notifications.push({ message, type })
@@ -93,74 +228,4 @@ test("dump and restore commands save and display commands without launching sess
       },
     },
   }
-
-  registerSessionCommands(pi, {
-    homeDirectory: "/home/marlen",
-    findSessions: async () => [
-      {
-        workingDirectory: "/worktree/project",
-        sessionId: "019fb989-c2ee-7000-96ea-2a2cce5229b6",
-      },
-    ],
-    saveSnapshot: async (path, snapshot) => {
-      savedPath = path
-      savedSnapshot = snapshot
-    },
-    loadSnapshot: async (path) => {
-      assert.equal(path, snapshotPath)
-      return savedSnapshot
-    },
-  })
-
-  await commands.get("dump-active-sessions").handler("", context)
-  await commands.get("restore-active-sessions").handler("", context)
-
-  assert.equal(savedPath, snapshotPath)
-  assert.equal(savedSnapshot, "cd '/worktree/project' && omp --resume '019fb989-c2ee-7000-96ea-2a2cce5229b6'\n")
-  assert.deepEqual(notifications, [{
-    message: `Saved 1 active OMP session to ${snapshotPath}.`,
-    type: "info",
-  }])
-  assert.deepEqual(editors, [{
-    title: "Resume Active OMP Sessions — Copy Commands Manually",
-    contents: savedSnapshot,
-  }])
-})
-
-test("restore reports a missing snapshot instead of starting a session", async () => {
-  const commands = new Map()
-  const notifications = []
-
-  ompSessionResumeHelper({
-    setLabel() {},
-    registerCommand(name, options) {
-      commands.set(name, options)
-    },
-  })
-
-  const context = {
-    ui: {
-      notify(message, type) {
-        notifications.push({ message, type })
-      },
-      async editor() {
-        assert.fail("missing snapshots must not open an editor")
-      },
-    },
-  }
-
-  await commands.get("restore-active-sessions").handler("/missing-snapshot", context)
-
-  assert.deepEqual(notifications, [{
-    message: "No active-session snapshot exists at /missing-snapshot.",
-    type: "warning",
-  }])
-})
-
-test("snapshot paths use the home-state directory by default", () => {
-  assert.equal(
-    resolveSnapshotPath("", "/home/marlen"),
-    "/home/marlen/.local/state/omp-session-resume-helper/active-sessions.txt",
-  )
-  assert.equal(resolveSnapshotPath("~/resume.txt", "/home/marlen"), "/home/marlen/resume.txt")
-})
+}
