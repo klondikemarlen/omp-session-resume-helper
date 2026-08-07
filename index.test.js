@@ -99,6 +99,16 @@ test("resume commands quote paths and session IDs for Bash", () => {
   )
 })
 
+test("resume commands use adjacent lines", () => {
+  assert.equal(
+    formatResumeCommands([
+      { workingDirectory: "/worktree/one", sessionId: "one" },
+      { workingDirectory: "/worktree/two", sessionId: "two" },
+    ]),
+    "cd '/worktree/one' && omp --resume 'one'\ncd '/worktree/two' && omp --resume 'two'\n",
+  )
+})
+
 test("dump and show commands keep automatic snapshots manual to use", async () => {
   const commands = new Map()
   const notifications = []

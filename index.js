@@ -136,7 +136,7 @@ export function formatResumeCommands(sessions) {
 
   return `${sessions.map(({ workingDirectory, sessionId }) => (
     `cd ${shellQuote(workingDirectory)} && omp --resume ${shellQuote(sessionId)}`
-  )).join("\n\n")}\n`
+  )).join("\n")}\n`
 }
 
 export function resolveCustomSnapshotPath(args, homeDirectory = homedir()) {
