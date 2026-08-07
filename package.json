@@ -1,6 +1,6 @@
 {
   "name": "omp-session-resume-helper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Save and manually resume active Oh My Pi sessions after a laptop restart.",
   "type": "module",
   "license": "MIT",
