@@ -99,7 +99,7 @@ test("resume commands quote paths and session IDs for Bash", () => {
   )
 })
 
-test("dump and restore commands keep automatic snapshots manual to use", async () => {
+test("dump and show commands keep automatic snapshots manual to use", async () => {
   const commands = new Map()
   const notifications = []
   const editors = []
@@ -120,7 +120,7 @@ test("dump and restore commands keep automatic snapshots manual to use", async (
   })
 
   await commands.get("dump-active-sessions").handler("", context)
-  await commands.get("restore-active-sessions").handler("", context)
+  await commands.get("show-saved-sessions").handler("", context)
 
   assert.deepEqual(captures, [{ homeDirectory: "/home/marlen", outputPath: undefined }])
   assert.deepEqual(notifications, [{
@@ -133,7 +133,7 @@ test("dump and restore commands keep automatic snapshots manual to use", async (
   }])
 })
 
-test("custom dump and restore paths stay supported", async () => {
+test("custom dump and show paths stay supported", async () => {
   const commands = new Map()
   const captures = []
   const loadedPaths = []
@@ -154,7 +154,7 @@ test("custom dump and restore paths stay supported", async () => {
   })
 
   await commands.get("dump-active-sessions").handler("~/resume commands.txt", context)
-  await commands.get("restore-active-sessions").handler("~/resume commands.txt", context)
+  await commands.get("show-saved-sessions").handler("~/resume commands.txt", context)
 
   assert.deepEqual(captures, [{ homeDirectory: "/home/marlen", outputPath: customPath }])
   assert.deepEqual(loadedPaths, [customPath])
@@ -221,7 +221,7 @@ test("the plugin registers commands and lifecycle snapshots", () => {
 
   ompSessionResumeHelper(createPi(commands, handlers))
 
-  assert.deepEqual([...commands.keys()].sort(), ["dump-active-sessions", "restore-active-sessions"])
+  assert.deepEqual([...commands.keys()].sort(), ["dump-active-sessions", "show-saved-sessions"])
   assert.deepEqual([...handlers.keys()].sort(), ["session_shutdown", "session_start"])
 })
 

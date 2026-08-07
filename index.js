@@ -51,8 +51,8 @@ export function registerSessionCommands(pi, dependencies = {}) {
     },
   })
 
-  pi.registerCommand("restore-active-sessions", {
-    description: "Show saved OMP resume commands without starting sessions",
+  pi.registerCommand("show-saved-sessions", {
+    description: "Show a saved OMP session snapshot without starting sessions",
     handler: async (args, context) => {
       const outputPath = resolveCustomSnapshotPath(args, homeDirectory)
       const snapshot = outputPath
