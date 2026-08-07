@@ -54,13 +54,13 @@ Start OMP once, then run:
 
 The command selects the newest snapshot from a prior Linux boot. This protects the pre-crash list when starting the first OMP session after reboot creates a new current-boot snapshot. If there is no prior-boot history, it uses the newest current-boot snapshot.
 
-The command prints one saved command per OMP transcript line without changing the prompt. Copy each command into its own terminal or tab. For a custom snapshot file, provide the same path:
+The command prints the selected snapshot path and a shell-safe `cat` command without changing the prompt. Run that command in a Bash shell to inspect and compare the exact saved commands. For a custom snapshot file, provide the same path:
 
 ```text
 /show-saved-sessions ~/Documents/omp-resume-commands.txt
 ```
 
-`/show-saved-sessions` only displays saved commands. It does not automatically launch OMP sessions.
+`/show-saved-sessions` only displays the snapshot location. It does not automatically launch OMP sessions.
 
 ## Ptyxis and GNOME
 
