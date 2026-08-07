@@ -49,7 +49,7 @@ Worker processes, non-terminal processes, and missing terminal records are ignor
 Start OMP once, then run:
 
 ```text
-/restore-active-sessions
+/show-saved-sessions
 ```
 
 The command selects the newest snapshot from a prior Linux boot. This protects the pre-crash list when starting the first OMP session after reboot creates a new current-boot snapshot. If there is no prior-boot history, it uses the newest current-boot snapshot.
@@ -57,10 +57,10 @@ The command selects the newest snapshot from a prior Linux boot. This protects t
 The plugin opens the saved command list in an editor. Copy each command into its own terminal or tab. For a custom snapshot file, provide the same path:
 
 ```text
-/restore-active-sessions ~/Documents/omp-resume-commands.txt
+/show-saved-sessions ~/Documents/omp-resume-commands.txt
 ```
 
-`/restore-active-sessions` only displays commands. It does not automatically launch OMP sessions.
+`/show-saved-sessions` only displays saved commands. It does not automatically launch OMP sessions.
 
 ## Ptyxis and GNOME
 
