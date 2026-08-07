@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -12,9 +12,9 @@ import ompSessionResumeHelper, {
   shellQuote,
 } from "./index.js"
 
-test("findActiveSessions exports plain and absolute OMP processes only", async () => {
-
+test("findActiveSessions exports plain and absolute OMP processes only", async (testContext) => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "omp-session-resume-helper-"))
+  testContext.after(() => rm(temporaryDirectory, { force: true, recursive: true }))
   const agentDirectory = join(temporaryDirectory, "agent")
   const processDirectory = join(temporaryDirectory, "proc")
   const workingDirectory = join(temporaryDirectory, "active worktree")
