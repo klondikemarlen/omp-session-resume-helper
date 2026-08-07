@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 
 import ompSessionResumeHelper, {
+  captureActiveSessions,
   findActiveSessions,
   formatResumeCommands,
   registerLifecycleSnapshots,
@@ -12,6 +13,7 @@ import ompSessionResumeHelper, {
   resolveCustomSnapshotPath,
   shellQuote,
 } from "./index.js"
+import { listSnapshots } from "./snapshot-history.js"
 
 test("findActiveSessions exports plain and absolute OMP processes only", async (testContext) => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "omp-session-resume-helper-"))
@@ -156,6 +158,32 @@ test("custom dump and restore paths stay supported", async () => {
 
   assert.deepEqual(captures, [{ homeDirectory: "/home/marlen", outputPath: customPath }])
   assert.deepEqual(loadedPaths, [customPath])
+})
+
+test("custom dumps also preserve an automatic history snapshot", async (testContext) => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "omp-session-resume-helper-"))
+  testContext.after(() => rm(temporaryDirectory, { force: true, recursive: true }))
+  const historyDirectory = join(temporaryDirectory, "snapshots")
+  const customPath = join(temporaryDirectory, "resume-commands.txt")
+
+  await captureActiveSessions({
+    bootId: "current-boot",
+    homeDirectory: temporaryDirectory,
+    findSessions: async () => [{
+      workingDirectory: "/worktree/project",
+      sessionId: "019fb989-c2ee-7000-96ea-2a2cce5229b6",
+    }],
+    historyDirectory,
+    outputPath: customPath,
+  })
+
+  const history = await listSnapshots(historyDirectory)
+
+  assert.equal(history.length, 1)
+  assert.equal(
+    await readFile(customPath, "utf8"),
+    "cd '/worktree/project' && omp --resume '019fb989-c2ee-7000-96ea-2a2cce5229b6'\n",
+  )
 })
 
 test("lifecycle snapshots run at startup and process shutdown", async () => {

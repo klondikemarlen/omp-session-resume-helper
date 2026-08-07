@@ -86,13 +86,16 @@ export async function captureActiveSessions(options = {}) {
     const sessions = await findSessions({ excludeSessionId: options.excludeSessionId })
     const commands = formatResumeCommands(sessions)
 
+    const snapshot = await writeSnapshot(commands, { bootId, historyDirectory })
+
     if (options.outputPath) {
-      const path = await writeCustomSnapshot(options.outputPath, commands)
-      return { path, sessionCount: sessions.length }
+      await writeCustomSnapshot(options.outputPath, commands)
     }
 
-    const snapshot = await writeSnapshot(commands, { bootId, historyDirectory })
-    return { path: snapshot.path, sessionCount: sessions.length }
+    return {
+      path: options.outputPath ?? snapshot.path,
+      sessionCount: sessions.length,
+    }
   })
 }
 

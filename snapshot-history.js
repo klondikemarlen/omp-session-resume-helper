@@ -159,7 +159,11 @@ async function acquireLock(lockDirectory, bootId) {
       }
     }
 
-    if (await lockBelongsToAnotherBoot(lockDirectory, bootId) || await isStaleLock(lockDirectory)) {
+    if (
+      await lockBelongsToAnotherBoot(lockDirectory, bootId)
+      || await lockOwnerIsNotRunning(lockDirectory)
+      || await isStaleLock(lockDirectory)
+    ) {
       await rm(lockDirectory, { force: true, recursive: true })
       continue
     }
@@ -176,6 +180,21 @@ async function lockBelongsToAnotherBoot(lockDirectory, bootId) {
     return owner.bootId !== bootId
   } catch {
     return false
+  }
+}
+
+async function lockOwnerIsNotRunning(lockDirectory) {
+  try {
+    const owner = JSON.parse(await readFile(join(lockDirectory, "owner.json"), "utf8"))
+
+    if (!Number.isInteger(owner.pid)) {
+      return false
+    }
+
+    process.kill(owner.pid, 0)
+    return false
+  } catch (error) {
+    return error?.code === "ESRCH"
   }
 }
 
