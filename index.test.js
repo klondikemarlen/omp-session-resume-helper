@@ -138,7 +138,7 @@ test("dump and show commands keep automatic snapshots manual to use", async () =
       type: "info",
     },
     {
-      message: recoveryCommands,
+      message: `Saved session snapshot: ${recoveryPath}\nRun: cat '${recoveryPath}'`,
       type: "info",
     },
   ])
@@ -149,8 +149,9 @@ test("custom dump and show paths stay supported", async () => {
   const captures = []
   const loadedPaths = []
   const customPath = "/home/marlen/resume commands.txt"
+  const notifications = []
   const pi = createPi(commands)
-  const context = createContext([])
+  const context = createContext(notifications)
 
   registerSessionCommands(pi, {
     capture: async (options) => {
@@ -169,6 +170,17 @@ test("custom dump and show paths stay supported", async () => {
 
   assert.deepEqual(captures, [{ homeDirectory: "/home/marlen", outputPath: customPath }])
   assert.deepEqual(loadedPaths, [customPath])
+
+  assert.deepEqual(notifications, [
+    {
+      message: `Saved 0 active OMP sessions to ${customPath}.`,
+      type: "info",
+    },
+    {
+      message: `Saved session snapshot: ${customPath}\nRun: cat '${customPath}'`,
+      type: "info",
+    },
+  ])
 })
 
 test("custom dumps also preserve an automatic history snapshot", async (testContext) => {
