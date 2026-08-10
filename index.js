@@ -20,6 +20,7 @@ const DEFAULT_AGENT_DIRECTORY = join(homedir(), ".omp", "agent")
 
 export default function ompSessionResumeHelper(pi) {
   pi.setLabel("OMP Session Resume Helper")
+  registerSessionSnapshotRenderer(pi)
   registerSessionCommands(pi)
   registerLifecycleSnapshots(pi)
 }
@@ -40,6 +41,7 @@ export function registerSessionCommands(pi, dependencies = {}) {
   const loadRecovery = dependencies.loadRecovery ?? loadRecoverySnapshot
   const loadSnapshot = dependencies.loadSnapshot ?? readCustomSnapshot
   const homeDirectory = dependencies.homeDirectory ?? homedir()
+  const cat = dependencies.cat ?? ((snapshotPath) => pi.exec("cat", [snapshotPath]))
 
   pi.registerCommand("dump-active-sessions", {
     description: "Save manual OMP resume commands for active sessions",
@@ -53,7 +55,7 @@ export function registerSessionCommands(pi, dependencies = {}) {
   })
 
   pi.registerCommand("show-saved-sessions", {
-    description: "Show a saved OMP session snapshot path without starting sessions",
+    description: "Show a saved OMP session snapshot as command output without starting sessions",
     handler: async (args, context) => {
       const outputPath = resolveCustomSnapshotPath(args, homeDirectory)
       const snapshot = outputPath
@@ -70,8 +72,36 @@ export function registerSessionCommands(pi, dependencies = {}) {
         return
       }
 
-      context.ui.notify(`Saved session snapshot: ${snapshot.path}\nRun: cat ${shellQuote(snapshot.path)}`, "info")
+      const result = await cat(snapshot.path)
+
+      if (result.code !== 0) {
+        context.ui.notify(`Could not read saved session snapshot at ${snapshot.path}: ${result.stderr.trim() || `cat exited with ${result.code}.`}`, "error")
+        return
+      }
+
+      pi.sendMessage({
+        content: "",
+        customType: "saved-session-snapshot",
+        details: { output: result.stdout, path: snapshot.path },
+        display: true,
+      }, { triggerTurn: false })
     },
+  })
+}
+
+function registerSessionSnapshotRenderer(pi) {
+  pi.registerMessageRenderer("saved-session-snapshot", (message, _options, theme) => {
+    const { output, path } = message.details ?? {}
+
+    if (typeof output !== "string" || typeof path !== "string") {
+      return undefined
+    }
+
+    const container = new pi.pi.Container()
+    container.addChild(new pi.pi.Text(`Saved session snapshot: ${path}`, 0, 0))
+    container.addChild(new pi.pi.Text(theme.fg("success", `$ cat ${shellQuote(path)}`), 0, 0))
+    container.addChild(new pi.pi.Text(output, 0, 0))
+    return container
   })
 }
 
