@@ -21,6 +21,16 @@ export async function getCurrentBootId(bootIdPath = "/proc/sys/kernel/random/boo
   return (await readFile(bootIdPath, "utf8")).trim()
 }
 
+export async function getCurrentBootStartedAt(bootStatPath = "/proc/stat") {
+  const bootTime = (await readFile(bootStatPath, "utf8")).match(/^btime\s+(\d+)$/m)?.[1]
+
+  if (!bootTime) {
+    throw new Error(`Could not read Linux boot time from ${bootStatPath}.`)
+  }
+
+  return new Date(Number(bootTime) * 1000)
+}
+
 export async function withSnapshotLock(historyDirectory, bootId, operation) {
   await mkdir(historyDirectory, { recursive: true })
 
@@ -39,7 +49,7 @@ export async function writeSnapshot(commands, options = {}) {
   const bootId = options.bootId ?? await getCurrentBootId(options.bootIdPath)
   const createdAt = options.createdAt ?? new Date()
   const snapshotId = options.snapshotId ?? randomUUID()
-  const fileName = `${createdAt.toISOString()}_${bootId}_${snapshotId}.txt`
+  const fileName = `${createdAt.toISOString()}.txt`
   const snapshotPath = join(historyDirectory, fileName)
 
   await writeFileAtomically(snapshotPath, commands, snapshotId)
@@ -56,8 +66,11 @@ export async function writeCustomSnapshot(snapshotPath, commands, snapshotId = r
 export async function loadRecoverySnapshot(options = {}) {
   const historyDirectory = options.historyDirectory ?? getSnapshotDirectory(options.homeDirectory)
   const bootId = options.bootId ?? await getCurrentBootId(options.bootIdPath)
+  const bootStartedAt = options.bootStartedAt ?? await getCurrentBootStartedAt(options.bootStatPath)
   const snapshots = await listSnapshots(historyDirectory)
-  const priorBootSnapshots = snapshots.filter((snapshot) => snapshot.bootId !== bootId)
+  const priorBootSnapshots = snapshots.filter((snapshot) => (
+    snapshot.bootId ? snapshot.bootId !== bootId : snapshot.createdAt < bootStartedAt
+  ))
   const selectedSnapshot = priorBootSnapshots[0] ?? snapshots[0]
 
   if (!selectedSnapshot) {
@@ -133,18 +146,19 @@ export async function listSnapshots(historyDirectory) {
 }
 
 export function parseSnapshotFileName(fileName) {
-  const match = fileName.match(/^([^_]+)_([^_]+)_([^_]+)\.txt$/)
+  const legacyMatch = fileName.match(/^([^_]+)_([^_]+)_([^_]+)\.txt$/)
+  const timestamp = legacyMatch?.[1] ?? fileName.slice(0, -".txt".length)
+  const createdAt = new Date(timestamp)
 
-  if (!match) {
+  if (
+    !fileName.endsWith(".txt")
+    || Number.isNaN(createdAt.getTime())
+    || (!legacyMatch && timestamp.includes("_"))
+  ) {
     return undefined
   }
 
-  const createdAt = new Date(match[1])
-  if (Number.isNaN(createdAt.getTime())) {
-    return undefined
-  }
-
-  return { bootId: match[2], createdAt, fileName }
+  return { bootId: legacyMatch?.[2], createdAt, fileName }
 }
 
 async function acquireLock(lockDirectory, bootId) {

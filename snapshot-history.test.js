@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -13,34 +13,29 @@ import {
   writeSnapshot,
 } from "./snapshot-history.js"
 
-test("restore selects the newest snapshot from a prior boot", async (testContext) => {
+test("restore selects the newest timestamp snapshot from a prior boot", async (testContext) => {
   const historyDirectory = await createHistoryDirectory(testContext)
-  const priorBootId = "prior-boot"
-  const currentBootId = "current-boot"
 
   await writeSnapshot("old commands\n", {
-    bootId: priorBootId,
     createdAt: new Date("2026-08-07T10:00:00.000Z"),
     historyDirectory,
-    snapshotId: "old",
   })
   await writeSnapshot("new commands\n", {
-    bootId: priorBootId,
     createdAt: new Date("2026-08-07T11:00:00.000Z"),
     historyDirectory,
-    snapshotId: "new",
   })
   await writeSnapshot("current commands\n", {
-    bootId: currentBootId,
     createdAt: new Date("2026-08-07T12:00:00.000Z"),
     historyDirectory,
-    snapshotId: "current",
   })
 
-  const snapshot = await loadRecoverySnapshot({ bootId: currentBootId, historyDirectory })
+  const snapshot = await loadRecoverySnapshot({
+    bootId: "current-boot",
+    bootStartedAt: new Date("2026-08-07T11:30:00.000Z"),
+    historyDirectory,
+  })
 
   assert.equal(snapshot.commands, "new commands\n")
-  assert.equal(snapshot.bootId, priorBootId)
 })
 
 test("pruning keeps the newest 100 expired snapshots", async (testContext) => {
@@ -60,7 +55,7 @@ test("pruning keeps the newest 100 expired snapshots", async (testContext) => {
   const snapshots = await listSnapshots(historyDirectory)
 
   assert.equal(snapshots.length, 100)
-  assert.equal(snapshots.at(-1).fileName.includes("_001.txt"), true)
+  assert.equal(snapshots.at(-1).fileName, "2026-06-01T00:00:01.000Z.txt")
 })
 
 test("snapshot writes leave only complete files", async (testContext) => {
@@ -75,7 +70,28 @@ test("snapshot writes leave only complete files", async (testContext) => {
 
   const files = await readdir(historyDirectory)
 
-  assert.deepEqual(files, ["2026-08-07T10:00:00.000Z_boot_snapshot.txt"])
+  assert.deepEqual(files, ["2026-08-07T10:00:00.000Z.txt"])
+})
+
+test("restore reads legacy UUID-named snapshots", async (testContext) => {
+  const historyDirectory = await createHistoryDirectory(testContext)
+  const priorSnapshot = join(historyDirectory, "2026-08-07T10:00:00.000Z_prior-boot_snapshot.txt")
+  const currentSnapshot = join(historyDirectory, "2026-08-07T12:00:00.000Z_current-boot_snapshot.txt")
+
+  await mkdir(historyDirectory)
+
+  await Promise.all([
+    writeFile(priorSnapshot, "prior commands\n"),
+    writeFile(currentSnapshot, "current commands\n"),
+  ])
+
+  const snapshot = await loadRecoverySnapshot({
+    bootId: "current-boot",
+    bootStartedAt: new Date("2026-08-07T11:30:00.000Z"),
+    historyDirectory,
+  })
+
+  assert.equal(snapshot.commands, "prior commands\n")
 })
 
 test("snapshot locks serialize concurrent captures", async (testContext) => {
