@@ -9,6 +9,7 @@ import {
   getSnapshotDirectory,
   loadRecoverySnapshot,
   migrateLegacySnapshot,
+  migrateLegacySnapshots,
   withSnapshotLock,
   writeCustomSnapshot,
   writeSnapshot,
@@ -82,6 +83,8 @@ export async function captureActiveSessions(options = {}) {
 
   return withSnapshotLock(historyDirectory, bootId, async () => {
     await migrateLegacySnapshot({ historyDirectory, homeDirectory })
+
+    await migrateLegacySnapshots(historyDirectory)
 
     const sessions = await findSessions({ excludeSessionId: options.excludeSessionId })
     const commands = formatResumeCommands(sessions)

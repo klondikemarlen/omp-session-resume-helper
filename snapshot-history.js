@@ -71,16 +71,14 @@ export async function loadRecoverySnapshot(options = {}) {
   const priorBootSnapshots = snapshots.filter((snapshot) => (
     snapshot.bootId ? snapshot.bootId !== bootId : snapshot.createdAt < bootStartedAt
   ))
-  const selectedSnapshot = priorBootSnapshots[0] ?? snapshots[0]
+  const recoveryCandidates = priorBootSnapshots.length > 0 ? priorBootSnapshots : snapshots
+  const snapshotsWithCommands = await Promise.all(recoveryCandidates.map(async (snapshot) => ({
+    ...snapshot,
+    commands: await readFile(snapshot.path, "utf8"),
+  })))
+  const selectedSnapshot = snapshotsWithCommands.find((snapshot) => snapshot.commands.trim() !== "")
 
-  if (!selectedSnapshot) {
-    return undefined
-  }
-
-  return {
-    ...selectedSnapshot,
-    commands: await readFile(selectedSnapshot.path, "utf8"),
-  }
+  return selectedSnapshot ?? snapshotsWithCommands[0]
 }
 
 export async function migrateLegacySnapshot(options = {}) {
@@ -109,6 +107,14 @@ export async function migrateLegacySnapshot(options = {}) {
 
     throw error
   }
+}
+
+export async function migrateLegacySnapshots(historyDirectory) {
+  const snapshots = await listSnapshots(historyDirectory)
+
+  await Promise.all(snapshots.filter((snapshot) => snapshot.bootId).map((snapshot) => (
+    rename(snapshot.path, join(historyDirectory, `${snapshot.createdAt.toISOString()}.txt`))
+  )))
 }
 
 export async function pruneSnapshots(historyDirectory, options = {}) {
