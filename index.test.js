@@ -124,6 +124,7 @@ test("dump and show commands keep automatic snapshots manual to use", async () =
       captures.push(options)
       return { path: recoveryPath, sessionCount: 1 }
     },
+    cat: async (path) => ({ code: 0, stderr: "", stdout: `${path}\n${recoveryCommands}` }),
     homeDirectory: "/home/marlen",
     loadRecovery: async () => ({ commands: recoveryCommands, path: recoveryPath }),
   })
@@ -137,11 +138,16 @@ test("dump and show commands keep automatic snapshots manual to use", async () =
       message: `Saved 1 active OMP session to ${recoveryPath}.`,
       type: "info",
     },
-    {
-      message: `Saved session snapshot: ${recoveryPath}\nRun: cat '${recoveryPath}'`,
-      type: "info",
-    },
   ])
+  assert.deepEqual(pi.sentMessages, [{
+    message: {
+      content: "",
+      customType: "saved-session-snapshot",
+      details: { output: `${recoveryPath}\n${recoveryCommands}`, path: recoveryPath },
+      display: true,
+    },
+    options: { triggerTurn: false },
+  }])
 })
 
 test("custom dump and show paths stay supported", async () => {
@@ -158,6 +164,7 @@ test("custom dump and show paths stay supported", async () => {
       captures.push(options)
       return { path: customPath, sessionCount: 0 }
     },
+    cat: async () => ({ code: 0, stderr: "", stdout: "resume command\n" }),
     homeDirectory: "/home/marlen",
     loadSnapshot: async (path) => {
       loadedPaths.push(path)
@@ -176,11 +183,36 @@ test("custom dump and show paths stay supported", async () => {
       message: `Saved 0 active OMP sessions to ${customPath}.`,
       type: "info",
     },
-    {
-      message: `Saved session snapshot: ${customPath}\nRun: cat '${customPath}'`,
-      type: "info",
-    },
   ])
+  assert.deepEqual(pi.sentMessages, [{
+    message: {
+      content: "",
+      customType: "saved-session-snapshot",
+      details: { output: "resume command\n", path: customPath },
+      display: true,
+    },
+    options: { triggerTurn: false },
+  }])
+})
+
+test("showing a saved session reports cat failures", async () => {
+  const commands = new Map()
+  const notifications = []
+  const pi = createPi(commands)
+  const snapshotPath = "/home/marlen/.local/state/omp-session-resume-helper/snapshots/recovery.txt"
+
+  registerSessionCommands(pi, {
+    cat: async () => ({ code: 1, stderr: "Permission denied\n", stdout: "" }),
+    loadRecovery: async () => ({ commands: "resume command\n", path: snapshotPath }),
+  })
+
+  await commands.get("show-saved-sessions").handler("", createContext(notifications))
+
+  assert.deepEqual(notifications, [{
+    message: `Could not read saved session snapshot at ${snapshotPath}: Permission denied`,
+    type: "error",
+  }])
+  assert.deepEqual(pi.sentMessages, [])
 })
 
 test("custom dumps also preserve an automatic history snapshot", async (testContext) => {
@@ -248,6 +280,28 @@ test("the plugin registers commands and lifecycle snapshots", () => {
   assert.deepEqual([...handlers.keys()].sort(), ["session_shutdown", "session_start"])
 })
 
+test("the snapshot renderer labels Bash output without adding prompt content", () => {
+  const pi = createPi(new Map())
+  const snapshotPath = "/home/marlen/resume commands.txt"
+
+  ompSessionResumeHelper(pi)
+
+  const rendered = pi.messageRenderers.get("saved-session-snapshot")({
+    content: "",
+    details: { output: "resume command\n", path: snapshotPath },
+  }, {}, {
+    fg(_color, text) {
+      return text
+    },
+  })
+
+  assert.deepEqual(rendered.children.map((child) => child.text), [
+    `Saved session snapshot: ${snapshotPath}`,
+    `$ cat '${snapshotPath}'`,
+    "resume command\n",
+  ])
+})
+
 test("custom snapshot paths expand the home directory", () => {
   assert.equal(resolveCustomSnapshotPath("", "/home/marlen"), undefined)
   assert.equal(resolveCustomSnapshotPath("~/resume.txt", "/home/marlen"), "/home/marlen/resume.txt")
@@ -258,11 +312,33 @@ function createPi(commands, handlers = new Map()) {
     logger: {
       warn() {},
     },
+    messageRenderers: new Map(),
     on(name, handler) {
       handlers.set(name, handler)
     },
+    pi: {
+      Container: class {
+        children = []
+
+        addChild(child) {
+          this.children.push(child)
+        }
+      },
+      Text: class {
+        constructor(text) {
+          this.text = text
+        }
+      },
+    },
     registerCommand(name, options) {
       commands.set(name, options)
+    },
+    registerMessageRenderer(name, renderer) {
+      this.messageRenderers.set(name, renderer)
+    },
+    sentMessages: [],
+    sendMessage(message, options) {
+      this.sentMessages.push({ message, options })
     },
     setLabel() {},
   }
