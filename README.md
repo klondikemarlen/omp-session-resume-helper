@@ -22,7 +22,7 @@ Snapshots live here:
 ~/.local/state/omp-session-resume-helper/snapshots/
 ```
 
-Each snapshot records the full active-session command list, its Linux boot ID, and its creation time. Writes are serialized with a per-user lock and committed with atomic rename, so simultaneous OMP lifecycle events cannot replace or expose a partial snapshot.
+New snapshots use only their ISO creation timestamp as the file name, for example `2026-08-10T16:07:07.151Z.txt`. The plugin uses the Linux boot start time to select a pre-reboot snapshot and still recognizes legacy UUID-named snapshots. Writes are serialized with a per-user lock and committed with atomic rename, so simultaneous OMP lifecycle events cannot replace or expose a partial snapshot.
 
 Snapshots older than 30 days are pruned during normal writes, but the newest 100 are always retained. No cron job, systemd timer, database, or background daemon is required.
 
