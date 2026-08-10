@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -8,6 +8,7 @@ import {
   listSnapshots,
   loadRecoverySnapshot,
   migrateLegacySnapshot,
+  migrateLegacySnapshots,
   pruneSnapshots,
   withSnapshotLock,
   writeSnapshot,
@@ -26,6 +27,10 @@ test("restore selects the newest timestamp snapshot from a prior boot", async (t
   })
   await writeSnapshot("current commands\n", {
     createdAt: new Date("2026-08-07T12:00:00.000Z"),
+    historyDirectory,
+  })
+  await writeSnapshot("", {
+    createdAt: new Date("2026-08-07T11:15:00.000Z"),
     historyDirectory,
   })
 
@@ -92,6 +97,37 @@ test("restore reads legacy UUID-named snapshots", async (testContext) => {
   })
 
   assert.equal(snapshot.commands, "prior commands\n")
+})
+
+test("migration renames UUID snapshots without changing commands", async (testContext) => {
+  const historyDirectory = await createHistoryDirectory(testContext)
+  const legacySnapshot = join(historyDirectory, "2026-08-07T10:00:00.000Z_prior-boot_snapshot.txt")
+
+  await mkdir(historyDirectory)
+  await writeFile(legacySnapshot, "resume command\n")
+  await migrateLegacySnapshots(historyDirectory)
+
+  const snapshotPath = join(historyDirectory, "2026-08-07T10:00:00.000Z.txt")
+
+  assert.deepEqual(await readdir(historyDirectory), ["2026-08-07T10:00:00.000Z.txt"])
+  assert.equal(await readFile(snapshotPath, "utf8"), "resume command\n")
+})
+
+test("restore returns an empty snapshot only when no commands exist", async (testContext) => {
+  const historyDirectory = await createHistoryDirectory(testContext)
+
+  await writeSnapshot("", {
+    createdAt: new Date("2026-08-07T10:00:00.000Z"),
+    historyDirectory,
+  })
+
+  const snapshot = await loadRecoverySnapshot({
+    bootId: "current-boot",
+    bootStartedAt: new Date("2026-08-07T11:00:00.000Z"),
+    historyDirectory,
+  })
+
+  assert.equal(snapshot.commands, "")
 })
 
 test("snapshot locks serialize concurrent captures", async (testContext) => {
