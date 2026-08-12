@@ -5,9 +5,12 @@ import { join } from "node:path"
 import { test } from "node:test"
 
 import ompSessionResumeHelper, {
+  canRestoreWithPtyxis,
   captureActiveSessions,
   findActiveSessions,
+  formatPtyxisRestorePlan,
   formatResumeCommands,
+  parseResumeCommands,
   registerLifecycleSnapshots,
   registerSessionCommands,
   resolveCustomSnapshotPath,
@@ -215,6 +218,154 @@ test("showing a saved session reports cat failures", async () => {
   assert.deepEqual(pi.sentMessages, [])
 })
 
+test("restore falls back to the portable snapshot when Ptyxis is unavailable", async () => {
+  const commands = new Map()
+  const notifications = []
+  const pi = createPi(commands)
+  const recoveryPath = "/home/marlen/.local/state/omp-session-resume-helper/snapshots/recovery.txt"
+  const recoveryCommands = "cd '/worktree/project' && omp --resume 'session'\n"
+
+  registerSessionCommands(pi, {
+    canRestore: async () => false,
+    cat: async () => ({ code: 0, stderr: "", stdout: recoveryCommands }),
+    loadRecovery: async () => ({ commands: recoveryCommands, path: recoveryPath }),
+    launch: async () => assert.fail("unavailable Ptyxis must not launch"),
+  })
+
+  const context = createContext(notifications)
+  await commands.get("restore-saved-sessions").handler("", context)
+
+  assert.equal(context.confirmations.length, 0)
+  assert.deepEqual(notifications, [])
+  assert.equal(pi.sentMessages.length, 1)
+})
+
+test("restore previews and launches each valid saved session in a Ptyxis window", async () => {
+  const commands = new Map()
+  const notifications = []
+  const pi = createPi(commands)
+  const recoveryPath = "/home/marlen/.local/state/omp-session-resume-helper/snapshots/recovery.txt"
+  const recoveryCommands = [
+    "cd '/worktree/one' && omp --resume 'first'",
+    "cd '/worktree/Marlen'\\''s project' && omp --resume 'second'",
+    "",
+  ].join("\n")
+
+  registerSessionCommands(pi, {
+    canRestore: async () => true,
+    cat: async () => ({ code: 0, stderr: "", stdout: recoveryCommands }),
+    loadRecovery: async () => ({ commands: recoveryCommands, path: recoveryPath }),
+    resolveDirectory: async (directory) => directory,
+  })
+
+  const context = createContext(notifications)
+  await commands.get("restore-saved-sessions").handler("", context)
+
+  assert.deepEqual(context.confirmations, [{
+    message: "Ptyxis will open one new window per session:\n- /worktree/one: omp --resume 'first'\n- /worktree/Marlen's project: omp --resume 'second'",
+    title: "Restore saved OMP sessions in Ptyxis?",
+  }])
+  assert.deepEqual(pi.execCalls, [
+    {
+      args: ["--new-window", "--working-directory", "/worktree/one", "--", "omp", "--resume", "first"],
+      command: "ptyxis",
+    },
+    {
+      args: ["--new-window", "--working-directory", "/worktree/Marlen's project", "--", "omp", "--resume", "second"],
+      command: "ptyxis",
+    },
+  ])
+  assert.deepEqual(notifications, [{
+    message: "Opened 2 saved OMP sessions in Ptyxis.",
+    type: "info",
+  }])
+})
+
+test("restore does not launch unrecognized snapshot commands", async () => {
+  const commands = new Map()
+  const notifications = []
+  const pi = createPi(commands)
+
+  registerSessionCommands(pi, {
+    canRestore: async () => true,
+    cat: async () => ({ code: 0, stderr: "", stdout: "echo unrecognized\n" }),
+    launch: async () => assert.fail("unrecognized commands must not launch"),
+    loadRecovery: async () => ({ commands: "echo unrecognized\n", path: "/resume.txt" }),
+  })
+
+  const context = createContext(notifications)
+  await commands.get("restore-saved-sessions").handler("", context)
+
+  assert.equal(context.confirmations.length, 0)
+  assert.equal(pi.sentMessages.length, 1)
+  assert.deepEqual(notifications, [{
+    message: "This snapshot contains commands that cannot be safely restored automatically. Copy its displayed commands into terminals instead.",
+    type: "warning",
+  }])
+})
+
+test("restore reports stale working directories and failed Ptyxis launches", async () => {
+  const commands = new Map()
+  const notifications = []
+  const pi = createPi(commands)
+  const recoveryCommands = [
+    "cd '/missing' && omp --resume 'missing'",
+    "cd '/available' && omp --resume 'failed'",
+    "",
+  ].join("\n")
+
+  registerSessionCommands(pi, {
+    canRestore: async () => true,
+    cat: async () => ({ code: 0, stderr: "", stdout: recoveryCommands }),
+    launch: async () => ({ code: 1 }),
+    loadRecovery: async () => ({ commands: recoveryCommands, path: "/resume.txt" }),
+    resolveDirectory: async (directory) => {
+      if (directory === "/missing") throw new Error("missing")
+      return directory
+    },
+  })
+
+  await commands.get("restore-saved-sessions").handler("", createContext(notifications))
+
+  assert.deepEqual(notifications, [
+    {
+      message: "Skipped 1 saved session with missing working directory.",
+      type: "warning",
+    },
+    {
+      message: "Opened 0 saved OMP sessions; 1 Ptyxis launch failed.",
+      type: "error",
+    },
+  ])
+})
+
+test("Ptyxis recovery requires a Linux graphical session and available Ptyxis", async () => {
+  let calls = 0
+  const execute = async () => {
+    calls += 1
+    return { code: 0 }
+  }
+
+  assert.equal(await canRestoreWithPtyxis({ environment: { DISPLAY: ":0" }, execute, platform: "darwin" }), false)
+  assert.equal(await canRestoreWithPtyxis({ environment: {}, execute, platform: "linux" }), false)
+  assert.equal(await canRestoreWithPtyxis({ environment: { WAYLAND_DISPLAY: "wayland-0" }, execute, platform: "linux" }), true)
+  assert.equal(calls, 1)
+})
+
+test("resume command parsing preserves shell-quoted values", () => {
+  const commands = "cd '/worktree/Marlen'\\''s project' && omp --resume 'session'\n"
+
+  assert.deepEqual(parseResumeCommands(commands), [{
+    workingDirectory: "/worktree/Marlen's project",
+    sessionId: "session",
+  }])
+  assert.equal(parseResumeCommands("echo unsafe\n"), undefined)
+  assert.equal(
+    formatPtyxisRestorePlan([{ workingDirectory: "/worktree/project", sessionId: "session" }]),
+    "Ptyxis will open one new window per session:\n- /worktree/project: omp --resume 'session'",
+  )
+})
+
 test("custom dumps also preserve an automatic history snapshot", async (testContext) => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "omp-session-resume-helper-"))
   testContext.after(() => rm(temporaryDirectory, { force: true, recursive: true }))
@@ -276,7 +427,7 @@ test("the plugin registers commands and lifecycle snapshots", () => {
 
   ompSessionResumeHelper(createPi(commands, handlers))
 
-  assert.deepEqual([...commands.keys()].sort(), ["dump-active-sessions", "show-saved-sessions"])
+  assert.deepEqual([...commands.keys()].sort(), ["dump-active-sessions", "restore-saved-sessions", "show-saved-sessions"])
   assert.deepEqual([...handlers.keys()].sort(), ["session_shutdown", "session_start"])
 })
 
@@ -330,6 +481,11 @@ function createPi(commands, handlers = new Map()) {
         }
       },
     },
+    execCalls: [],
+    async exec(command, args) {
+      this.execCalls.push({ args, command })
+      return { code: 0, stderr: "", stdout: "" }
+    },
     registerCommand(name, options) {
       commands.set(name, options)
     },
@@ -344,9 +500,16 @@ function createPi(commands, handlers = new Map()) {
   }
 }
 
-function createContext(notifications) {
+function createContext(notifications, confirmed = true) {
+  const confirmations = []
+
   return {
+    confirmations,
     ui: {
+      async confirm(title, message) {
+        confirmations.push({ message, title })
+        return confirmed
+      },
       notify(message, type) {
         notifications.push({ message, type })
       },
