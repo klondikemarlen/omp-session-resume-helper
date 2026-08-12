@@ -62,9 +62,19 @@ The command selects the snapshot, runs `cat` on it, and renders the path, comman
 
 `/show-saved-sessions` does not automatically launch OMP sessions or add the saved commands to the prompt.
 
+## Restore Saved Sessions
+
+Run `/restore-saved-sessions` to display the same portable snapshot. On Linux with a graphical session and an available [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) executable, it previews one new window per saved session and asks before launching anything.
+
+Everywhere else, it stops after the portable display. Snapshots with commands not written by this plugin also remain displayable but are never launched automatically.
+
+```text
+/restore-saved-sessions ~/Documents/omp-resume-commands.txt
+```
+
 ## Ptyxis and GNOME
 
-Ptyxis can restore terminal tabs when its `restore-session` setting is enabled; on this system it is enabled by default. That restores terminal windows and tabs, not the OMP processes terminated by a reboot. Use this plugin to recover the OMP sessions themselves after Ptyxis reopens.
+Ptyxis can restore terminal tabs when its `restore-session` setting is enabled; on this system it is enabled by default. That restores terminal windows and tabs, not the OMP processes terminated by a reboot. `/restore-saved-sessions` can start new Ptyxis windows for saved OMP sessions when the capability is available, but it does not infer or restore prior window/tab groups.
 
 GNOME and Ubuntu do not provide a general facility for reviving arbitrary terminal child processes after a reboot. Persistent process managers such as `tmux` can preserve a session across a dropped terminal connection, but a full reboot still ends processes unless a separate service restores them.
 

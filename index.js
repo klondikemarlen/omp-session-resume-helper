@@ -54,39 +54,176 @@ export function registerSessionCommands(pi, dependencies = {}) {
     },
   })
 
+  const showSavedSnapshot = async (args, context) => {
+    const outputPath = resolveCustomSnapshotPath(args, homeDirectory)
+    const snapshot = outputPath
+      ? { commands: await loadSnapshot(outputPath), path: outputPath }
+      : await loadRecovery({ homeDirectory })
+
+    if (!snapshot) {
+      context.ui.notify("No active-session snapshots exist yet.", "warning")
+      return undefined
+    }
+
+    if (snapshot.commands.trim() === "") {
+      context.ui.notify(`The newest recovery snapshot at ${snapshot.path} has no active OMP sessions.`, "warning")
+      return undefined
+    }
+
+    const result = await cat(snapshot.path)
+
+    if (result.code !== 0) {
+      context.ui.notify(`Could not read saved session snapshot at ${snapshot.path}: ${result.stderr.trim() || `cat exited with ${result.code}.`}`, "error")
+      return undefined
+    }
+
+    pi.sendMessage({
+      content: "",
+      customType: "saved-session-snapshot",
+      details: { output: result.stdout, path: snapshot.path },
+      display: true,
+    }, { triggerTurn: false })
+
+    return { ...snapshot, commands: result.stdout }
+  }
+
   pi.registerCommand("show-saved-sessions", {
     description: "Show a saved OMP session snapshot as command output without starting sessions",
+    handler: (args, context) => showSavedSnapshot(args, context),
+  })
+
+  const canRestore = dependencies.canRestore ?? (() => canRestoreWithPtyxis({
+    execute: (command, args) => pi.exec(command, args),
+  }))
+  const launch = dependencies.launch ?? ((session) => pi.exec("ptyxis", [
+    "--new-window",
+    "--working-directory",
+    session.workingDirectory,
+    "--",
+    "omp",
+    "--resume",
+    session.sessionId,
+  ]))
+  const resolveDirectory = dependencies.resolveDirectory ?? realpath
+
+  pi.registerCommand("restore-saved-sessions", {
+    description: "Restore saved OMP sessions in Ptyxis when available",
     handler: async (args, context) => {
-      const outputPath = resolveCustomSnapshotPath(args, homeDirectory)
-      const snapshot = outputPath
-        ? { commands: await loadSnapshot(outputPath), path: outputPath }
-        : await loadRecovery({ homeDirectory })
+      const snapshot = await showSavedSnapshot(args, context)
 
       if (!snapshot) {
-        context.ui.notify("No active-session snapshots exist yet.", "warning")
         return
       }
 
-      if (snapshot.commands.trim() === "") {
-        context.ui.notify(`The newest recovery snapshot at ${snapshot.path} has no active OMP sessions.`, "warning")
+      if (!await canRestore()) {
         return
       }
 
-      const result = await cat(snapshot.path)
+      const sessions = parseResumeCommands(snapshot.commands)
 
-      if (result.code !== 0) {
-        context.ui.notify(`Could not read saved session snapshot at ${snapshot.path}: ${result.stderr.trim() || `cat exited with ${result.code}.`}`, "error")
+      if (!sessions) {
+        context.ui.notify("This snapshot contains commands that cannot be safely restored automatically. Copy its displayed commands into terminals instead.", "warning")
         return
       }
 
-      pi.sendMessage({
-        content: "",
-        customType: "saved-session-snapshot",
-        details: { output: result.stdout, path: snapshot.path },
-        display: true,
-      }, { triggerTurn: false })
+      if (sessions.length === 0) {
+        return
+      }
+
+      const availableSessions = []
+      const missingDirectories = []
+
+      for (const session of sessions) {
+        try {
+          await resolveDirectory(session.workingDirectory)
+          availableSessions.push(session)
+        } catch {
+          missingDirectories.push(session.workingDirectory)
+        }
+      }
+
+      if (missingDirectories.length > 0) {
+        context.ui.notify(`Skipped ${missingDirectories.length} saved session${missingDirectories.length === 1 ? "" : "s"} with missing working director${missingDirectories.length === 1 ? "y" : "ies"}.`, "warning")
+      }
+
+      if (availableSessions.length === 0) {
+        return
+      }
+
+      const confirmed = await context.ui.confirm(
+        "Restore saved OMP sessions in Ptyxis?",
+        formatPtyxisRestorePlan(availableSessions),
+      )
+
+      if (!confirmed) {
+        return
+      }
+
+      const results = await Promise.allSettled(availableSessions.map(launch))
+
+      const failedLaunches = results.filter((result) => (
+        result.status === "rejected" || result.value.code !== 0
+      )).length
+      const restoredSessions = availableSessions.length - failedLaunches
+
+      context.ui.notify(
+        failedLaunches === 0
+          ? `Opened ${restoredSessions} saved OMP session${restoredSessions === 1 ? "" : "s"} in Ptyxis.`
+          : `Opened ${restoredSessions} saved OMP session${restoredSessions === 1 ? "" : "s"}; ${failedLaunches} Ptyxis launch${failedLaunches === 1 ? "" : "es"} failed.`,
+        failedLaunches === 0 ? "info" : "error",
+      )
     },
   })
+}
+
+export async function canRestoreWithPtyxis(options = {}) {
+  const platform = options.platform ?? process.platform
+  const environment = options.environment ?? process.env
+
+  if (platform !== "linux" || (!environment.DISPLAY && !environment.WAYLAND_DISPLAY)) {
+    return false
+  }
+
+  try {
+    return (await options.execute("ptyxis", ["--help"])).code === 0
+  } catch {
+    return false
+  }
+}
+
+export function parseResumeCommands(commands) {
+  const sessions = []
+
+  for (const command of commands.split("\n")) {
+    if (command === "") {
+      continue
+    }
+
+    const match = command.match(/^cd ('(?:[^']|'\\'')*') && omp --resume ('(?:[^']|'\\'')*')$/)
+
+    if (!match) {
+      return undefined
+    }
+
+    sessions.push({
+      workingDirectory: unquoteShellQuote(match[1]),
+      sessionId: unquoteShellQuote(match[2]),
+    })
+  }
+
+  return sessions
+}
+
+export function formatPtyxisRestorePlan(sessions) {
+  const commands = sessions.map(({ workingDirectory, sessionId }) => (
+    `- ${workingDirectory}: omp --resume ${shellQuote(sessionId)}`
+  )).join("\n")
+
+  return `Ptyxis will open one new window per session:\n${commands}`
+}
+
+function unquoteShellQuote(value) {
+  return value.slice(1, -1).replaceAll("'\\''", "'")
 }
 
 function registerSessionSnapshotRenderer(pi) {
