@@ -92,16 +92,18 @@ export function registerSessionCommands(pi, dependencies = {}) {
     handler: (args, context) => showSavedSnapshot(args, context),
   })
 
+  const ompPath = dependencies.ompPath ?? process.env.PATH
   const canRestore = dependencies.canRestore ?? (() => canRestoreWithPtyxis({
     execute: (command, args) => pi.exec(command, args),
   }))
-  const ompExecutable = dependencies.ompExecutable ?? process.execPath
   const launch = dependencies.launch ?? ((session) => pi.exec("ptyxis", [
     "--new-window",
     "--working-directory",
     session.workingDirectory,
     "--",
-    ompExecutable,
+    "/usr/bin/env",
+    `PATH=${ompPath}`,
+    "omp",
     "--resume",
     session.sessionId,
   ]))
@@ -116,7 +118,7 @@ export function registerSessionCommands(pi, dependencies = {}) {
         return
       }
 
-      if (!await canRestore()) {
+      if (!ompPath || !await canRestore()) {
         return
       }
 
@@ -153,7 +155,7 @@ export function registerSessionCommands(pi, dependencies = {}) {
 
       const confirmed = await context.ui.confirm(
         "Restore saved OMP sessions in Ptyxis?",
-        formatPtyxisRestorePlan(availableSessions, ompExecutable),
+        formatPtyxisRestorePlan(availableSessions),
       )
 
       if (!confirmed) {
@@ -215,9 +217,9 @@ export function parseResumeCommands(commands) {
   return sessions
 }
 
-export function formatPtyxisRestorePlan(sessions, ompExecutable) {
+export function formatPtyxisRestorePlan(sessions) {
   const commands = sessions.map(({ workingDirectory, sessionId }) => (
-    `- ${workingDirectory}: ${shellQuote(ompExecutable)} --resume ${shellQuote(sessionId)}`
+    `- ${workingDirectory}: omp --resume ${shellQuote(sessionId)} (using current OMP session PATH)`
   )).join("\n")
 
   return `Ptyxis will open one new window per session:\n${commands}`
