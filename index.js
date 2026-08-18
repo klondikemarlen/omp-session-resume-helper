@@ -95,12 +95,13 @@ export function registerSessionCommands(pi, dependencies = {}) {
   const canRestore = dependencies.canRestore ?? (() => canRestoreWithPtyxis({
     execute: (command, args) => pi.exec(command, args),
   }))
+  const ompExecutable = dependencies.ompExecutable ?? process.execPath
   const launch = dependencies.launch ?? ((session) => pi.exec("ptyxis", [
     "--new-window",
     "--working-directory",
     session.workingDirectory,
     "--",
-    "omp",
+    ompExecutable,
     "--resume",
     session.sessionId,
   ]))
@@ -152,7 +153,7 @@ export function registerSessionCommands(pi, dependencies = {}) {
 
       const confirmed = await context.ui.confirm(
         "Restore saved OMP sessions in Ptyxis?",
-        formatPtyxisRestorePlan(availableSessions),
+        formatPtyxisRestorePlan(availableSessions, ompExecutable),
       )
 
       if (!confirmed) {
@@ -214,9 +215,9 @@ export function parseResumeCommands(commands) {
   return sessions
 }
 
-export function formatPtyxisRestorePlan(sessions) {
+export function formatPtyxisRestorePlan(sessions, ompExecutable) {
   const commands = sessions.map(({ workingDirectory, sessionId }) => (
-    `- ${workingDirectory}: omp --resume ${shellQuote(sessionId)}`
+    `- ${workingDirectory}: ${shellQuote(ompExecutable)} --resume ${shellQuote(sessionId)}`
   )).join("\n")
 
   return `Ptyxis will open one new window per session:\n${commands}`

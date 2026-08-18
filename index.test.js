@@ -256,22 +256,23 @@ test("restore previews and launches each valid saved session in a Ptyxis window"
     cat: async () => ({ code: 0, stderr: "", stdout: recoveryCommands }),
     loadRecovery: async () => ({ commands: recoveryCommands, path: recoveryPath }),
     resolveDirectory: async (directory) => directory,
+    ompExecutable: "/opt/omp/bin/omp",
   })
 
   const context = createContext(notifications)
   await commands.get("restore-saved-sessions").handler("", context)
 
   assert.deepEqual(context.confirmations, [{
-    message: "Ptyxis will open one new window per session:\n- /worktree/one: omp --resume 'first'\n- /worktree/Marlen's project: omp --resume 'second'",
+    message: "Ptyxis will open one new window per session:\n- /worktree/one: '/opt/omp/bin/omp' --resume 'first'\n- /worktree/Marlen's project: '/opt/omp/bin/omp' --resume 'second'",
     title: "Restore saved OMP sessions in Ptyxis?",
   }])
   assert.deepEqual(pi.execCalls, [
     {
-      args: ["--new-window", "--working-directory", "/worktree/one", "--", "omp", "--resume", "first"],
+      args: ["--new-window", "--working-directory", "/worktree/one", "--", "/opt/omp/bin/omp", "--resume", "first"],
       command: "ptyxis",
     },
     {
-      args: ["--new-window", "--working-directory", "/worktree/Marlen's project", "--", "omp", "--resume", "second"],
+      args: ["--new-window", "--working-directory", "/worktree/Marlen's project", "--", "/opt/omp/bin/omp", "--resume", "second"],
       command: "ptyxis",
     },
   ])
@@ -361,8 +362,8 @@ test("resume command parsing preserves shell-quoted values", () => {
   }])
   assert.equal(parseResumeCommands("echo unsafe\n"), undefined)
   assert.equal(
-    formatPtyxisRestorePlan([{ workingDirectory: "/worktree/project", sessionId: "session" }]),
-    "Ptyxis will open one new window per session:\n- /worktree/project: omp --resume 'session'",
+    formatPtyxisRestorePlan([{ workingDirectory: "/worktree/project", sessionId: "session" }], "/opt/omp/bin/omp"),
+    "Ptyxis will open one new window per session:\n- /worktree/project: '/opt/omp/bin/omp' --resume 'session'",
   )
 })
 
