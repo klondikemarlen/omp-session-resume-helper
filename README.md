@@ -64,7 +64,7 @@ The command selects the snapshot, runs `cat` on it, and renders the path, comman
 
 ## Restore Saved Sessions
 
-Run `/restore-saved-sessions` to display the same portable snapshot. On Linux with a graphical session and an available [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) executable, it previews one new window per saved session and asks before launching anything.
+Run `/restore-saved-sessions` to display the same portable snapshot. On Linux with a graphical session and an available [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) executable, it previews one new window per saved session and asks before launching anything. Each Ptyxis window receives the currently running OMP executable's absolute path, so its desktop environment does not need the shell's OMP `PATH` entry.
 
 Everywhere else, it stops after the portable display. Snapshots with commands not written by this plugin also remain displayable but are never launched automatically.
 
