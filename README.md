@@ -24,7 +24,7 @@ Snapshots live here:
 
 New snapshots use only their ISO creation timestamp as the file name, for example `2026-08-10T16:07:07.151Z.txt`. The plugin uses the Linux boot start time to select a pre-reboot snapshot. On its next automatic capture, it renames legacy UUID-named snapshots to the short form without changing their contents. Writes are serialized with a per-user lock and committed with atomic rename, so simultaneous OMP lifecycle events cannot replace or expose a partial snapshot.
 
-Automatic captures with no active sessions create no snapshot. Normal writes retain only the newest 20 snapshots. No cron job, systemd timer, database, or background daemon is required.
+Automatic captures with no active sessions create no snapshot. Normal writes retain only the newest 10 snapshots. No cron job, systemd timer, database, or background daemon is required.
 
 The first history write migrates the original `active-sessions.txt` snapshot from version 0.1.0, so existing recovery commands remain available.
 

@@ -43,13 +43,13 @@ test("restore selects the newest timestamp snapshot from a prior boot", async (t
   assert.equal(snapshot.commands, "new commands\n")
 })
 
-test("when snapshot count exceeds 20, writes retain its 20 newest entries", async (testContext) => {
+test("when snapshot count exceeds 10, writes retain its 10 newest entries", async (testContext) => {
   // Arrange
   const historyDirectory = await createHistoryDirectory(testContext)
   const firstSnapshotTime = new Date("2026-06-01T00:00:00.000Z")
 
   // Act
-  for (let index = 0; index < 21; index += 1) {
+  for (let index = 0; index < 11; index += 1) {
     await writeSnapshot(`snapshot ${index}\n`, {
       bootId: "prior-boot",
       createdAt: new Date(firstSnapshotTime.getTime() + index * 1000),
@@ -60,7 +60,7 @@ test("when snapshot count exceeds 20, writes retain its 20 newest entries", asyn
   const snapshots = await listSnapshots(historyDirectory)
 
   // Assert
-  assert.equal(snapshots.length, 20)
+  assert.equal(snapshots.length, 10)
   assert.equal(snapshots.at(-1).fileName, "2026-06-01T00:00:01.000Z.txt")
 })
 
