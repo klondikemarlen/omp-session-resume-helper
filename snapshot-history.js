@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
-export const MAX_SNAPSHOTS_TO_KEEP = 20
+export const MAX_SNAPSHOTS_TO_KEEP = 10
 
 const LOCK_RETRY_MS = 50
 const LOCK_STALE_MS = 30_000
