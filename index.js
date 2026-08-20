@@ -48,8 +48,13 @@ export function registerSessionCommands(pi, dependencies = {}) {
     handler: async (args, context) => {
       const outputPath = resolveCustomSnapshotPath(args, homeDirectory)
       const snapshot = await capture({ homeDirectory, outputPath })
-      const sessionDescription = snapshot.sessionCount === 1 ? "1 active OMP session" : `${snapshot.sessionCount} active OMP sessions`
 
+      if (!snapshot.path) {
+        context.ui.notify("No active OMP sessions to save.", "info")
+        return undefined
+      }
+
+      const sessionDescription = snapshot.sessionCount === 1 ? "1 active OMP session" : `${snapshot.sessionCount} active OMP sessions`
       context.ui.notify(`Saved ${sessionDescription} to ${snapshot.path}.`, "info")
     },
   })
@@ -259,14 +264,14 @@ export async function captureActiveSessions(options = {}) {
     const sessions = await findSessions({ excludeSessionId: options.excludeSessionId })
     const commands = formatResumeCommands(sessions)
 
-    const snapshot = await writeSnapshot(commands, { bootId, historyDirectory })
+    const snapshot = commands === "" ? undefined : await writeSnapshot(commands, { bootId, historyDirectory })
 
     if (options.outputPath) {
       await writeCustomSnapshot(options.outputPath, commands)
     }
 
     return {
-      path: options.outputPath ?? snapshot.path,
+      path: options.outputPath ?? snapshot?.path,
       sessionCount: sessions.length,
     }
   })

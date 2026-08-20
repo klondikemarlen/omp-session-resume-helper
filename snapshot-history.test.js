@@ -43,11 +43,13 @@ test("restore selects the newest timestamp snapshot from a prior boot", async (t
   assert.equal(snapshot.commands, "new commands\n")
 })
 
-test("pruning keeps the newest 100 expired snapshots", async (testContext) => {
+test("when snapshot count exceeds 20, writes retain its 20 newest entries", async (testContext) => {
+  // Arrange
   const historyDirectory = await createHistoryDirectory(testContext)
   const firstSnapshotTime = new Date("2026-06-01T00:00:00.000Z")
 
-  for (let index = 0; index < 101; index += 1) {
+  // Act
+  for (let index = 0; index < 21; index += 1) {
     await writeSnapshot(`snapshot ${index}\n`, {
       bootId: "prior-boot",
       createdAt: new Date(firstSnapshotTime.getTime() + index * 1000),
@@ -55,13 +57,13 @@ test("pruning keeps the newest 100 expired snapshots", async (testContext) => {
       snapshotId: String(index).padStart(3, "0"),
     })
   }
-
-  await pruneSnapshots(historyDirectory, { now: new Date("2026-08-07T00:00:00.000Z") })
   const snapshots = await listSnapshots(historyDirectory)
 
-  assert.equal(snapshots.length, 100)
+  // Assert
+  assert.equal(snapshots.length, 20)
   assert.equal(snapshots.at(-1).fileName, "2026-06-01T00:00:01.000Z.txt")
 })
+
 
 test("snapshot writes leave only complete files", async (testContext) => {
   const historyDirectory = await createHistoryDirectory(testContext)

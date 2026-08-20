@@ -393,6 +393,26 @@ test("custom dumps also preserve an automatic history snapshot", async (testCont
   )
 })
 
+test("when automatic capture finds no sessions, it skips the history snapshot", async (testContext) => {
+  // Arrange
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "omp-session-resume-helper-"))
+  testContext.after(() => rm(temporaryDirectory, { force: true, recursive: true }))
+  const historyDirectory = join(temporaryDirectory, "snapshots")
+
+  // Act
+  const snapshot = await captureActiveSessions({
+    bootId: "current-boot",
+    historyDirectory,
+    homeDirectory: temporaryDirectory,
+    findSessions: async () => [],
+  })
+
+  // Assert
+  assert.equal(snapshot.path, undefined)
+  assert.equal(snapshot.sessionCount, 0)
+  assert.deepEqual(await listSnapshots(historyDirectory), [])
+})
+
 test("lifecycle snapshots run at startup and process shutdown", async () => {
   const commands = new Map()
   const handlers = new Map()
