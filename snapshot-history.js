@@ -3,8 +3,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
-export const MAX_SNAPSHOT_AGE_MS = 30 * 24 * 60 * 60 * 1000
-export const MIN_SNAPSHOTS_TO_KEEP = 100
+export const MAX_SNAPSHOTS_TO_KEEP = 20
 
 const LOCK_RETRY_MS = 50
 const LOCK_STALE_MS = 30_000
@@ -117,13 +116,8 @@ export async function migrateLegacySnapshots(historyDirectory) {
   )))
 }
 
-export async function pruneSnapshots(historyDirectory, options = {}) {
-  const now = options.now ?? new Date()
-  const cutoffTime = now.getTime() - MAX_SNAPSHOT_AGE_MS
-  const snapshots = await listSnapshots(historyDirectory)
-  const snapshotsToRemove = snapshots.slice(MIN_SNAPSHOTS_TO_KEEP).filter((snapshot) => (
-    snapshot.createdAt.getTime() < cutoffTime
-  ))
+export async function pruneSnapshots(historyDirectory) {
+  const snapshotsToRemove = (await listSnapshots(historyDirectory)).slice(MAX_SNAPSHOTS_TO_KEEP)
 
   await Promise.all(snapshotsToRemove.map(({ path }) => rm(path, { force: true })))
 }
